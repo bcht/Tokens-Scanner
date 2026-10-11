@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light">
+<title>Tokens Scanner</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+
+  <section class="board" aria-label="Tokens Scanner 热力图">
+    <div class="board-head">
+      <div class="board-heading">
+        <h1 id="rangeTitle">最近 365 天</h1>
+        <p id="rangeSub">载入中</p>
+      </div>
+      <div class="board-tools">
+        <div class="seg" id="quick" role="group" aria-label="快捷时间范围"></div>
+        <div class="dates">
+          <input type="date" id="dateFrom" aria-label="起始日期">
+          <span class="dates__arrow">→</span>
+          <input type="date" id="dateTo" aria-label="结束日期">
+        </div>
+        <button type="button" class="ghost" id="tableToggle" aria-pressed="false">表格</button>
+      </div>
+    </div>
+
+    <div class="chart" id="chart">
+      <div class="months-row">
+        <div class="months-gutter"></div>
+        <div class="months" id="months"></div>
+      </div>
+      <div class="grid-row">
+        <div class="weekdays" id="weekdays"></div>
+        <div class="weeks" id="weeks"></div>
+      </div>
+    </div>
+
+    <div class="legend" id="legend"></div>
+
+    <div class="table-view" id="tableView" hidden></div>
+  </section>
+
+  <aside class="rail" aria-label="统计数字">
+
+    <div class="brand">
+      <img class="mark" id="brandLogo" src="logos/all.svg" alt="" width="34" height="34">
+      <div class="brand-text">
+        <span class="brand-name" id="brandName">全部来源</span>
+        <span class="brand-sub" id="brandSub">载入中</span>
+      </div>
+    </div>
+
+    <div class="rail-block">
+      <h2 class="rail-title">数据来源</h2>
+      <div class="picker" id="sourcePicker"></div>
+    </div>
+
+    <div class="rail-block figures">
+      <div class="hero">
+        <div class="hero-value num" id="heroValue"></div>
+        <span class="hero-unit" id="heroUnit">tokens</span>
+      </div>
+
+      <div class="picker picker--row" id="groupPicker"></div>
+
+      <div class="rows-viewport">
+        <div class="rows" id="rows"></div>
+      </div>
+
+      <div class="rail-notes" id="railNotes"></div>
+    </div>
+
+    <div class="rail-foot">
+      <div class="seg seg--tiny" id="poll" role="group" aria-label="自动刷新间隔"></div>
+      <div class="foot-right">
+        <span id="stamp">载入中</span>
+        <button type="button" class="ghost" id="rescan">重新扫描</button>
+      </div>
+    </div>
+  </aside>
+
+</div>
+
+<div class="tip" id="tip" role="status" aria-live="polite" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>

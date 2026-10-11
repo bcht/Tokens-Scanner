@@ -1,0 +1,628 @@
+/* Tokens Scanner —— 台账式界面
+   中性色取自「陶纸主义」规范;强调色仍是 #D97757,
+   但只出现在两处:热力图格子、合计大数字。控件一律墨色细线。
+   线条优先于阴影,纸是平的。 */
+
+:root {
+  /* —— 纸 —— */
+  --paper:        #F4F1EA;
+  --paper-raised: #FBF9F4;
+  --paper-sunk:   #EDE8DC;
+  --sand:         #E6D9C2;
+
+  /* —— 墨 —— */
+  --ink:          #1E1B17;
+  --ink-2:        #3A352E;
+  --ink-3:        #6E6960;
+
+  /* —— 线 —— */
+  --line:         #E0DACB;
+  --line-strong:  #CFC7B5;
+
+  /* —— 陶(强调色只用于热力图与合计大数字) —— */
+  --accent:       #D97757;
+  --accent-deep:  #AE5738;
+
+  /* 顺序色阶:单一色相,明度等距(每级 ΔL=0.100)。
+     一级色刻意压低到 L 0.845 —— 原来的 0.905 和纸底几乎分不开,
+     范围一短整张图就像没画出来。 */
+  --l1: #F5BDAA;
+  --l2: #E99375;
+  --l3: #D16E4B;
+  --l4: #AA5435;
+  --l5: #7F3F28;
+  /* 空格:比纸底低 0.054 的中性暖灰,够看清网格又不抢数据 */
+  --empty: #E5DFD6;
+
+  --cell: 14px;
+  --gap: 4px;
+
+  --font: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+/* hidden 属性会被 .row{display:grid} 这类显式 display 覆盖掉,这里兜住 */
+[hidden] { display: none !important; }
+
+html, body { margin: 0; height: 100%; }
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  cursor: default;
+  user-select: none;
+}
+
+/* 极轻的纸面噪点,替代纯色平涂 */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: .03;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+::selection { background: var(--sand); color: var(--ink); }
+
+.app {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  height: 100vh;
+}
+
+/* ------------------------------------------------------------ 左侧:图 */
+
+.board {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 30px 34px 22px;
+  overflow: auto;
+}
+
+.board-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 26px;
+}
+
+.board-heading { flex: none; }
+
+.board-heading h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+}
+
+.board-heading p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.board-tools { display: flex; align-items: center; gap: 10px; flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; }
+
+/* 分段控件(快捷时间 / 统计范围 / 自动刷新):与选择器同一套选中态 —— 墨色描边 */
+.seg {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+
+.seg button {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 4px 11px;
+  border-radius: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+
+.seg button:hover { background: var(--paper-sunk); color: var(--ink); }
+
+.seg button[aria-pressed="true"] {
+  background: transparent;
+  border-color: var(--ink);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.seg--tiny button { padding: 3px 8px; font-size: 11.5px; }
+
+.ghost {
+  appearance: none;
+  border: 1px solid var(--line-strong);
+  background: var(--paper-raised);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 5px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: border-color .15s ease, color .15s ease, background .15s ease;
+}
+
+.ghost:hover { border-color: var(--ink); color: var(--ink); }
+
+.ghost[aria-pressed="true"] {
+  border-color: var(--ink);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* 热力图:宽度不够时整块(月份轴 + 网格)一起横向滚动,不顶破页面 */
+.chart {
+  flex: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+}
+
+.months-row {
+  display: flex;
+  align-items: flex-end;
+  margin-bottom: 7px;
+  width: max-content;
+}
+
+.months-gutter { width: 27px; flex: none; }
+
+.months { position: relative; height: 15px; flex: none; }
+
+.month-label {
+  position: absolute;
+  bottom: 0;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.grid-row { display: flex; width: max-content; }
+
+.weekdays {
+  width: 27px;
+  flex: none;
+  display: grid;
+  grid-template-rows: repeat(7, var(--cell));
+  gap: var(--gap);
+}
+
+.weekday {
+  font-size: 10.5px;
+  color: var(--ink-3);
+  line-height: var(--cell);
+  height: var(--cell);
+}
+
+.weeks {
+  flex: none;
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, var(--cell));
+  grid-auto-columns: var(--cell);
+  gap: var(--gap);
+}
+
+.cell {
+  width: var(--cell);
+  height: var(--cell);
+  border-radius: 2px;
+  background: var(--empty);
+  transition: transform .12s ease;
+}
+
+.cell[data-level="1"] { background: var(--l1); }
+.cell[data-level="2"] { background: var(--l2); }
+.cell[data-level="3"] { background: var(--l3); }
+.cell[data-level="4"] { background: var(--l4); }
+.cell[data-level="5"] { background: var(--l5); }
+.cell[data-out="1"] { background: transparent; }
+
+.cell:hover,
+.cell:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 16px;
+  padding-left: 27px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  min-height: 15px;
+}
+
+/* 悬停任意一档会显示它对应的用量区间,用 help 光标提示可悬停 */
+.legend-swatch { width: 13px; height: 13px; border-radius: 2px; cursor: help; }
+
+.table-view {
+  margin-top: 22px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.table-view table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.table-view th {
+  text-align: right;
+  font-weight: 600;
+  color: var(--ink-2);
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line-strong);
+  position: sticky;
+  top: 0;
+  background: var(--paper);
+}
+
+.table-view th:first-child,
+.table-view td:first-child { text-align: left; }
+
+.table-view td {
+  text-align: right;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-2);
+}
+
+.table-view tbody tr:hover td { background: var(--paper-sunk); }
+
+.empty-note {
+  margin: 30px 0;
+  padding-left: 27px;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+/* --------------------------------------------------------- 右侧:侧栏 */
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--paper-raised);
+  border-left: 1px solid var(--line);
+  overflow: auto;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 26px 26px 22px;
+}
+
+.mark { width: 34px; height: 34px; flex: none; object-fit: contain; }
+
+.brand-text { display: flex; flex-direction: column; }
+
+.brand-name {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.brand-sub { font-size: 11.5px; color: var(--ink-3); margin-top: 1px; }
+
+.rail-block { padding: 18px 26px; border-top: 1px solid var(--line); }
+
+.rail-title {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+  letter-spacing: 0.02em;
+}
+
+/* 单选选择器:数据来源与分组共用同一套外观,没有复选框 */
+.picker { display: flex; flex-direction: column; gap: 1px; }
+
+.picker button {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 2px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  text-align: left;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+
+.picker button:hover { background: var(--paper-sunk); color: var(--ink); }
+
+/* 选中态用墨色描边,不用墨色填充 —— 大黑块太沉 */
+.picker button[aria-pressed="true"] {
+  background: transparent;
+  border-color: var(--ink);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.picker button[aria-pressed="true"] .picker-meta { color: var(--ink-3); }
+
+.picker button[data-disabled] { opacity: .45; cursor: not-allowed; }
+.picker button[data-disabled]:hover { background: transparent; color: var(--ink-2); border-color: transparent; }
+
+.picker-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.picker-meta {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 日期区间输入 */
+.dates { display: flex; align-items: center; gap: 6px; }
+
+.dates__arrow { color: var(--ink-3); font-size: 12px; }
+
+.dates input {
+  font: inherit;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  padding: 4px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--paper-raised);
+  outline: none;
+}
+
+.dates input:hover { border-color: var(--ink-3); }
+.dates input:focus { border-color: var(--ink); }
+
+/* 分组切换时整块左右推走 —— 外层裁掉滑出去的部分 */
+.rows-viewport { overflow: hidden; }
+
+.rows { display: flex; flex-direction: column; will-change: transform; }
+
+/* 横向变体,用于分组选择 */
+.picker--row { flex-direction: row; flex-wrap: wrap; }
+
+.picker--row button {
+  width: auto;
+  padding: 5px 10px;
+  font-size: 12.5px;
+}
+
+/* 数字 */
+.figures { display: flex; flex-direction: column; gap: 20px; padding-bottom: 22px; }
+
+.hero { display: flex; align-items: baseline; gap: 8px; }
+
+.hero-value {
+  font-family: var(--font-display);
+  font-size: 38px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  /* 强调色的第一处:合计大数字 */
+  color: var(--accent);
+}
+
+/* inline 元素不接受 transform,要跟着数字一起平移就得先把它变成 inline-block */
+.hero-unit {
+  display: inline-block;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink-3);
+  letter-spacing: 0;
+}
+
+.rows { display: flex; flex-direction: column; }
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 12px;
+  padding: 5.5px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.row-label {
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  text-align: right;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+/* 明细数字是纯文本,不参与滚动动画 */
+.value-text { font-variant-numeric: tabular-nums; }
+
+.row-share {
+  color: var(--ink-3);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.row.is-dim .row-label,
+.row.is-dim .row-value { color: var(--ink-3); }
+
+/* 提示:每条独占一行 */
+.rail-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 4px;
+}
+
+.rail-notes p {
+  margin: 0;
+  display: flex;
+  gap: 8px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--ink-3);
+}
+
+.rail-notes p::before {
+  content: "";
+  flex: none;
+  width: 4px;
+  height: 4px;
+  margin-top: .52em;
+  border-radius: 1px;
+  background: var(--line-strong);
+}
+
+.rail-foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 26px 16px;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.foot-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------- 滚动数字(机械计数器) */
+
+.num {
+  --h: 1.14em;
+  display: inline-flex;
+  align-items: center;
+  /* 滚轮需要每个字位等宽,否则数字变化时相邻位会左右抖动 */
+  font-variant-numeric: tabular-nums;
+}
+
+.num .roll { display: block; height: var(--h); overflow: hidden; }
+
+.num .track {
+  display: block;
+  transform: translateY(calc(var(--d, 0) * var(--h) * -1));
+  transition: transform .62s cubic-bezier(.24, 1.02, .3, 1);
+}
+
+.num .track > b {
+  display: block;
+  height: var(--h);
+  line-height: var(--h);
+  font-weight: inherit;
+}
+
+.num .sep {
+  display: block;
+  height: var(--h);
+  line-height: var(--h);
+}
+
+/* 悬浮提示 */
+.tip {
+  position: fixed;
+  z-index: 40;
+  pointer-events: none;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 8px 11px;
+  border-radius: 3px;
+  max-width: 260px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tip-head { font-weight: 600; margin-bottom: 3px; }
+
+.tip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  color: #B9B0A4;
+}
+
+.tip-row b { color: var(--paper); font-weight: 500; }
+
+/* 滚动条收细,别抢热力图的视觉 */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 6px;
+  border: 2px solid var(--paper);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--ink-3); }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* 窄窗口(小笔记本或分屏)改成上下堆叠,热力图仍然占满整宽 */
+@media (max-width: 1120px) {
+  body { overflow: auto; }
+
+  .app {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .board { overflow: visible; }
+
+  .rail {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    overflow: visible;
+  }
+
+  .brand,
+  .rail-block,
+  .rail-foot { padding-left: 34px; padding-right: 34px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

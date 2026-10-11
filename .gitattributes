@@ -1,0 +1,3 @@
+# 仓库里统一用 LF,Windows 的批处理单独用 CRLF
+* text=auto eol=lf
+*.bat text eol=crlf
