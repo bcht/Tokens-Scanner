@@ -4,11 +4,13 @@
     发现文件 -> 解析单个文件(可缓存) -> 聚合
 
 一条记录长这样:
-    [来源, 模型, 日期, 输入, 输出, 缓存读, 缓存写, 会话标识, 消息id]
+    [来源, 模型, 日期, 小时, 输入, 输出, 缓存读, 缓存写, 会话标识, 消息id]
 
 来源写在记录里,因为 Claude Code 和桌面版共用同一批文件、同一套解析,
 只有逐条的 entrypoint 能区分它们。
-日期只精确到天,因为热力图和统计都是按天的。
+日期取本地天、另存一个本地小时(0-23):热力图按天,时段分布按小时。
+小时为 HOUR_UNKNOWN 表示未知 —— 升级前存下的旧记录没有这个字段、补不出来,
+它们照常计入日统计,只是不进时段分布。
 消息 id 留着是为了跨文件去重:Claude 的同一条 assistant 消息会被重复写进
 多个文件且内容完全一致,必须全局去重,否则用量翻倍。
 
@@ -25,7 +27,7 @@ import os
 import time
 from collections import defaultdict
 
-from cache import session_key_for
+from cache import HOUR_UNKNOWN, session_key_for
 
 log = logging.getLogger("tokens.scanner")
 
@@ -37,7 +39,7 @@ SOURCES = [
 ]
 SOURCE_LABELS = dict(SOURCES)
 
-F_SOURCE, F_MODEL, F_DAY, F_IN, F_OUT, F_READ, F_WRITE, F_SESSION, F_MSG = range(9)
+F_SOURCE, F_MODEL, F_DAY, F_HOUR, F_IN, F_OUT, F_READ, F_WRITE, F_SESSION, F_MSG = range(10)
 
 
 # --------------------------------------------------------------------- 工具
@@ -172,6 +174,7 @@ def parse_claude_file(path):
             source,
             model,
             _day(when),
+            when.hour,
             _as_int(usage.get("input_tokens")),
             _as_int(usage.get("output_tokens")),
             _as_int(usage.get("cache_read_input_tokens")),
@@ -208,6 +211,7 @@ def parse_dsh_file(path):
                 "dsh",
                 model,
                 _day(when),
+                when.hour,
                 _as_int(usage.get("inputTokens")),
                 _as_int(usage.get("outputTokens")),
                 _as_int(usage.get("cacheReadTokens")),
@@ -262,7 +266,7 @@ def parse_codex_file(path):
             previous = current
 
         out.append([
-            "codex", model, _day(when),
+            "codex", model, _day(when), when.hour,
             delta[0], delta[1], delta[2], delta[3], session, None,
         ])
     return out
@@ -279,6 +283,8 @@ def aggregate(records):
     totals = defaultdict(_blank)
     daily = defaultdict(lambda: defaultdict(_blank))
     model_daily = defaultdict(lambda: defaultdict(_blank))
+    # 时段分布另开一张:键是 (天, 小时),前端才能跟着时间范围裁
+    hour_daily = defaultdict(lambda: defaultdict(_blank))
     days_seen = defaultdict(set)
 
     seen_message_ids = set()
@@ -292,10 +298,14 @@ def aggregate(records):
 
         source = record[F_SOURCE]
         day = record[F_DAY]
+        hour = record[F_HOUR]
         model = record[F_MODEL]
         values = (record[F_IN], record[F_OUT], record[F_READ], record[F_WRITE])
 
-        for bucket in (daily[source][day], model_daily[source][(model, day)], totals[source]):
+        buckets = [daily[source][day], model_daily[source][(model, day)], totals[source]]
+        if hour >= 0:
+            buckets.append(hour_daily[source][(day, hour)])
+        for bucket in buckets:
             for index, value in enumerate(values):
                 bucket[index] += value
             bucket[4] += 1
@@ -326,6 +336,13 @@ def aggregate(records):
                 for (model, day), bucket in sorted(
                     model_daily[sid].items(), key=lambda kv: (kv[0][1], kv[0][0])
                 )
+            ]
+            for sid, _ in SOURCES
+        },
+        "hourDaily": {
+            sid: [
+                [day, hour] + bucket
+                for (day, hour), bucket in sorted(hour_daily[sid].items())
             ]
             for sid, _ in SOURCES
         },

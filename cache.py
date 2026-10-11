@@ -27,8 +27,12 @@ DB_NAME = "usage-cache.db"
 # 磁盘上已经消失的会话只存在于库里。所以重建前会:
 #   ① 用 VACUUM INTO 把旧库整体另存一份(兜底,人工可恢复)
 #   ② 把旧表改名为 file_cache_prev,尽量把还能读的记录搬进新表
-CACHE_VERSION = 3
-RECORD_FIELDS = 9  # [来源, 模型, 日期, 输入, 输出, 缓存读, 缓存写, 会话, 消息id]
+CACHE_VERSION = 4
+RECORD_FIELDS = 10  # [来源, 模型, 日期, 小时, 输入, 输出, 缓存读, 缓存写, 会话, 消息id]
+
+# 4 版给记录加了「小时」。旧记录没这个字段、补不出来 —— 补成未知,
+# 照常计入日统计,只是不进时段分布。
+HOUR_UNKNOWN = -1
 
 META_SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -91,14 +95,33 @@ def session_key_for(parser_name, path):
     return "codex:" + os.path.splitext(os.path.basename(path))[0]
 
 
-def _records_look_current(parsed):
-    """记录格式没变才敢搬。变了就跳过,让它在备份里躺着。"""
+def _upgrade_record(item):
+    """把一条旧版记录补成当前格式;补不出来返回 None。
+
+    9 -> 10 这次只多了一个「小时」,插在日期后面,所以能无损补上 ——
+    补出来的值是"未知",日统计不受影响。比整条丢掉强得多:磁盘上已经
+    消失的会话,记录只存在于这里。
+    """
+    if not isinstance(item, list):
+        return None
+    if len(item) == RECORD_FIELDS:
+        return item
+    if len(item) == RECORD_FIELDS - 1:
+        return item[:3] + [HOUR_UNKNOWN] + item[3:]
+    return None
+
+
+def _upgrade_records(parsed):
+    """整份文件的记录一起升级。有一条补不出来就整份作废,让它重新解析。"""
     if not isinstance(parsed, list):
-        return False
-    for item in parsed[:1]:
-        if not isinstance(item, list) or len(item) != RECORD_FIELDS:
-            return False
-    return True
+        return None
+    out = []
+    for item in parsed:
+        upgraded = _upgrade_record(item)
+        if upgraded is None:
+            return None
+        out.append(upgraded)
+    return out
 
 
 class Cache:
@@ -167,8 +190,13 @@ class Cache:
         )
 
     def _migrate_prev(self):
-        """把旧表里还能按当前格式读出来的记录搬进新表。
-        读不出来就跳过 —— 另存的那份备份里有完整的旧库,不至于丢。"""
+        """把旧表里的记录升级后搬进新表。
+
+        补不出小时的记录记成"未知"留着;同时把 mtime 抹成 0,让这些文件
+        下次扫描重新解析一遍、把真实小时补上 —— 否则旧行会因为
+        path/mtime/size 全都对得上而被一直复用,永远停在"小时未知"。
+        文件已经不在了的不会再被扫到,就带着"未知"留在存档里。
+        """
         try:
             rows = self.conn.execute(
                 "SELECT path, source, mtime, size, records FROM file_cache_prev"
@@ -179,15 +207,16 @@ class Cache:
         moved = 0
         for path, source, mtime, size, records in rows:
             try:
-                parsed = json.loads(records)
+                parsed = _upgrade_records(json.loads(records))
             except (ValueError, TypeError):
                 continue
-            if not _records_look_current(parsed):
+            if parsed is None:
                 continue
             self.conn.execute(
                 "INSERT OR IGNORE INTO file_cache "
                 "(session_key, path, source, mtime, size, records) VALUES (?, ?, ?, ?, ?, ?)",
-                (session_key_for(source, path), path, source, mtime, size, records),
+                (session_key_for(source, path), path, source, 0.0, size,
+                 json.dumps(parsed, ensure_ascii=False)),
             )
             moved += 1
         return moved
@@ -246,9 +275,12 @@ class Cache:
             out = {}
             for key, path, mtime, size, records in rows:
                 try:
-                    out[key] = (path, mtime, size, json.loads(records))
+                    parsed = _upgrade_records(json.loads(records))
                 except (ValueError, TypeError):
+                    parsed = None
+                if parsed is None:
                     continue  # 这一行坏了就当没有,下次重算
+                out[key] = (path, mtime, size, parsed)
             return out
 
     def put(self, session_key, path, source, mtime, size, records):

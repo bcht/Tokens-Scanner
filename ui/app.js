@@ -15,6 +15,7 @@ const ROWS_SLIDE_MS = 165;
 
 /* 标签都存在 STRINGS 里,这里只留 key —— 切换语言时重建即可 */
 const QUICK_RANGES = [
+  { key: '24h', hours: 24 },
   { key: '7', days: 7 },
   { key: '30', days: 30 },
   { key: '365', days: 365 },
@@ -57,7 +58,7 @@ const STRINGS = {
     sources: '数据来源',
     allSources: '全部来源',
     notDetected: '未探测到',
-    quick: { 7: '近 7 天', 30: '近 30 天', 365: '近一年', all: '全部' },
+    quick: { '24h': '24 小时', 7: '7 天', 30: '30 天', 365: '一年', all: '全部' },
     group: { parts: '构成', sources: '按来源', models: '按模型', scale: '规模' },
     part: ['输入', '输出', '缓存读', '缓存写'],
     scale: ['连续活跃天数', '调用次数', '活跃天数', '数据区间'],
@@ -80,6 +81,10 @@ const STRINGS = {
     legendTop: (v) => `${v} 以上`,
     legendLess: '少',
     legendMore: '多',
+    hoursTitle: '时段分布',
+    hoursNote: '所选范围内所有天数的合计',
+    hoursPartial: (n) => `另有 ${compact(n)} 来自没有时刻记录的旧存档,不计入本图`,
+    tipHour: (h) => `${String(h).padStart(2, '0')} 时`,
     emptyTable: '这个范围里没有用量记录。',
     readFailed: '没读到本机用量数据。确认 Python 环境正常后,点「重新扫描」再试。',
     notDetectedNote: (name) => `${name} 在本机没有探测到数据。`,
@@ -102,7 +107,7 @@ const STRINGS = {
     sources: 'Sources',
     allSources: 'All sources',
     notDetected: 'Not found',
-    quick: { 7: '7 days', 30: '30 days', 365: '1 year', all: 'All' },
+    quick: { '24h': '24h', 7: '7 days', 30: '30 days', 365: '1 year', all: 'All' },
     group: { parts: 'Split', sources: 'Source', models: 'Model', scale: 'Scale' },
     part: ['Input', 'Output', 'Cache read', 'Cache write'],
     scale: ['Streak', 'Calls', 'Active days', 'Range'],
@@ -125,6 +130,10 @@ const STRINGS = {
     legendTop: (v) => `${v} and above`,
     legendLess: 'Less',
     legendMore: 'More',
+    hoursTitle: 'Time of day',
+    hoursNote: 'All days in range',
+    hoursPartial: (n) => `another ${compact(n)} is from older entries with no time of day`,
+    tipHour: (h) => `${String(h).padStart(2, '0')}:00`,
     emptyTable: 'No usage recorded in this range.',
     readFailed: 'Could not read local usage data. Check the Python environment, then hit “Rescan”.',
     notDetectedNote: (name) => `${name} was not found on this machine.`,
@@ -401,9 +410,15 @@ function boot() {
 function acceptData(data) {
   state.fatal = data ? null : t('readFailed');
   state.data = data || {
-    sources: [], daily: {}, modelDaily: {},
+    sources: [], daily: {}, modelDaily: {}, hourDaily: {},
     totals: {}, warnings: [], firstDay: null, lastDay: null,
   };
+
+  // 滚动窗口跨天之后,日期框显示的那两天要跟着走
+  if (state.quick && isRolling()) {
+    state.range = quickRange(state.quick);
+    syncDateInputs();
+  }
 
   if (!state.initialised) {
     state.initialised = true;
@@ -431,10 +446,36 @@ function acceptData(data) {
 function quickRange(key) {
   const option = QUICK_RANGES.find((q) => q.key === key);
   const end = todayKey();
+  if (option && option.hours) {
+    // 滚动窗口。终点是**此刻**,不是今天 24:00 —— 真实边界每次取数时现算
+    // (见 rollingStart),这里填的 from/to 只是给日期框显示那两天
+    return { from: ymd(addDays(parseYmd(end), -1)), to: end, hours: option.hours };
+  }
   if (!option || option.days === null) {
     return { from: earliestDay(), to: end };
   }
   return { from: ymd(addDays(parseYmd(end), -(option.days - 1))), to: end };
+}
+
+/* 「近 24 小时」这一档和别的不是一个东西:别的按自然日算,它是从此刻往前推。
+   两者共存的代价是**只有 hourDaily 能用来算这一档** —— daily / modelDaily
+   都只精确到天,拿它们会把这个窗口之外的量也算进来。 */
+
+const isRolling = () => Boolean(state.range.hours);
+
+/** 滚动窗口的起点,落地成 (天, 小时) —— 小时是数据的最小粒度 */
+function rollingStart() {
+  const cutoff = new Date(Date.now() - state.range.hours * 3600 * 1000);
+  return { day: ymd(cutoff), hour: cutoff.getHours() };
+}
+
+/** 某个 (天, 小时) 落在当前范围里吗。非滚动档退化成按天比 */
+function hourInRange(day, hour) {
+  if (!isRolling()) return inRange(day);
+  const start = rollingStart();
+  if (day > start.day) return true;
+  if (day < start.day) return false;
+  return hour >= start.hour;
 }
 
 function earliestDay() {
@@ -465,28 +506,58 @@ function scoped() {
   const days = new Set();
   const bySource = new Map();
   const byModel = new Map();
+  const byHour = Array.from({ length: 24 }, () => ({ total: 0, calls: 0 }));
+  const rolling = isRolling();
 
   for (const id of ids) {
     const sourceTotal = [0, 0, 0, 0, 0];
-    for (const day of Object.keys(state.data.daily[id] || {})) {
-      if (!inRange(day)) continue;
-      const record = state.data.daily[id][day];
-      for (let i = 0; i < 4; i += 1) {
-        parts[i] += record[i];
-        sourceTotal[i] += record[i];
-      }
-      calls += record[4];
-      sourceTotal[4] += record[4];
-      days.add(day);
-    }
-    bySource.set(id, sourceTotal);
 
-    for (const row of state.data.modelDaily[id] || []) {
-      if (!inRange(row[1])) continue;
-      const acc = byModel.get(row[0]) || [0, 0, 0, 0, 0];
-      for (let i = 0; i < 5; i += 1) acc[i] += row[i + 2];
-      byModel.set(row[0], acc);
+    // 小时级数据。非滚动档下它照常参与 —— 时段条要的是范围内所有天的合计。
+    // 行的形状是 [日, 时, 输入, 输出, 缓存读, 缓存写, 调用]
+    for (const row of state.data.hourDaily[id] || []) {
+      const day = row[0];
+      const hour = row[1];
+      if (!hourInRange(day, hour)) continue;
+
+      const bucket = byHour[hour];
+      bucket.total += row[2] + row[3] + row[4] + row[5];
+      bucket.calls += row[6];
+
+      // 滚动窗口下只有这一份数据能用:另外两张表只精确到天,
+      // 拿它们会把窗口之外的量也算进来
+      if (rolling) {
+        days.add(day);
+        for (let i = 0; i < 4; i += 1) {
+          parts[i] += row[i + 2];
+          sourceTotal[i] += row[i + 2];
+        }
+        calls += row[6];
+        sourceTotal[4] += row[6];
+      }
     }
+
+    if (!rolling) {
+      for (const day of Object.keys(state.data.daily[id] || {})) {
+        if (!inRange(day)) continue;
+        const record = state.data.daily[id][day];
+        for (let i = 0; i < 4; i += 1) {
+          parts[i] += record[i];
+          sourceTotal[i] += record[i];
+        }
+        calls += record[4];
+        sourceTotal[4] += record[4];
+        days.add(day);
+      }
+
+      for (const row of state.data.modelDaily[id] || []) {
+        if (!inRange(row[1])) continue;
+        const acc = byModel.get(row[0]) || [0, 0, 0, 0, 0];
+        for (let i = 0; i < 5; i += 1) acc[i] += row[i + 2];
+        byModel.set(row[0], acc);
+      }
+    }
+
+    bySource.set(id, sourceTotal);
   }
 
   // 连续活跃天数:从区间的**结束日**(也就是最新那天)往前倒推,
@@ -507,6 +578,7 @@ function scoped() {
     calls,
     byModel,
     bySource,
+    byHour,
     activeDays: days.size,
     streak,
     grand: parts[0] + parts[1] + parts[2] + parts[3],
@@ -551,7 +623,7 @@ function buildPicker(container, options, activeKey, onPick) {
       button.appendChild(meta);
     }
 
-    button.addEventListener('click', () => onPick(option));
+    button.addEventListener('click', () => { if (!option.disabled) onPick(option); });
     container.appendChild(button);
   }
 }
@@ -584,7 +656,13 @@ function buildSourcePicker() {
 }
 
 function buildGroupPicker() {
-  buildPicker($('groupPicker'), GROUP_OPTIONS.map((o) => ({ key: o.key, label: L().group[o.key] })), state.group, (option) => {
+  const options = GROUP_OPTIONS.map((o) => ({
+    key: o.key,
+    label: L().group[o.key],
+    // 「按模型」只有按天的数据,滚动窗口下给不出来,标灰
+    disabled: o.key === 'models' && isRolling(),
+  }));
+  buildPicker($('groupPicker'), options, state.group, (option) => {
     state.group = option.key;
     syncPressed($('groupPicker'), state.group);
     paint();
@@ -595,10 +673,8 @@ function buildQuick() {
   buildPicker($('quick'), QUICK_RANGES.map((q) => ({ key: q.key, label: L().quick[q.key] })), state.quick,
     (option) => {
       state.quick = option.key;
-      state.range = quickRange(option.key);
       syncPressed($('quick'), state.quick);
-      syncDateInputs();
-      paint();
+      applyRange(quickRange(option.key));
     });
   syncDateInputs();
 }
@@ -682,6 +758,16 @@ function applyLanguage(lang, persist = true) {
 
   if (!persist) return;
   persistPref('language', LANG);
+}
+
+/** 换时间范围。除了存下范围,还要处理它带来的连带变化 */
+function applyRange(range) {
+  state.range = range;
+  // 「按模型」在滚动窗口下没有数据可依,先从这个分组上挪开
+  if (isRolling() && state.group === 'models') state.group = 'parts';
+  buildGroupPicker();   // 「按模型」标不标灰是烘进按钮里的,得重建
+  syncDateInputs();
+  paint();
 }
 
 function syncDateInputs() {
@@ -768,30 +854,40 @@ function dayStats(dateKey) {
 
 /* 分档用对数刻度:用量常常跨几十倍,按分位数分档等于按**排名**上色 ——
    10-03(52.9M)和 10-11(146.8M)差 2.8 倍却同色,而 48.3M 和 51.3M 只差 6%
-   却差两档。改成在 log 空间里等分,颜色才真的对应用量。 */
-function computeThresholds() {
-  const values = [];
-  for (const cell of state.cells || []) {
-    const total = dayStats(cell.dataset.day).total;
-    if (total > 0) values.push(total);
-  }
+   却差两档。改成在 log 空间里等分,颜色才真的对应用量。
+   日热力图和时段条**各算一套** —— 单日的量和几十天合计差着数量级,
+   共用一套阈值会让其中一条要么全是最浅、要么全是最深。 */
+function logThresholds(values) {
   if (!values.length) return [0, 0, 0, 0];
 
   const lo = Math.log(Math.min(...values));
   const hi = Math.log(Math.max(...values));
   if (!(hi - lo > 1e-9)) {
-    // 每天都一样多:只有一个档有意义,全部落在最浅
+    // 全都一样多:只有一个档有意义,全部落在最浅
     const only = Math.exp(lo);
     return [only, only, only, only];
   }
   return [0.2, 0.4, 0.6, 0.8].map((q) => Math.exp(lo + (hi - lo) * q));
 }
 
-function levelOf(value) {
+function levelFrom(value, thresholds) {
   if (value <= 0) return 0;
   let level = 1;
-  for (const threshold of state.thresholds) if (value > threshold) level += 1;
+  for (const threshold of thresholds) if (value > threshold) level += 1;
   return Math.min(level, RAMP_STEPS);
+}
+
+function computeThresholds() {
+  const values = [];
+  for (const cell of state.cells || []) {
+    const total = dayStats(cell.dataset.day).total;
+    if (total > 0) values.push(total);
+  }
+  return logThresholds(values);
+}
+
+function levelOf(value) {
+  return levelFrom(value, state.thresholds);
 }
 
 function paintHeatmap() {
@@ -799,6 +895,53 @@ function paintHeatmap() {
   for (const cell of state.cells || []) {
     cell.dataset.level = String(levelOf(dayStats(cell.dataset.day).total));
   }
+}
+
+/* ------------------------------------------------------------- 时段分布
+
+   热力图下面常驻的一条 24 格:把所选时间范围内**所有天数**按小时累加。
+   刻意和日热力图长得不一样 —— 格子是竖长条而不是方块,下面带小时刻度,
+   免得两张图混成一张。 */
+
+function buildHours() {
+  const strip = $('hoursStrip');
+  const ticks = $('hoursTicks');
+  strip.textContent = '';
+  ticks.textContent = '';
+
+  for (let hour = 0; hour < 24; hour += 1) {
+    const cell = document.createElement('div');
+    cell.className = 'hour-cell';
+    cell.dataset.hour = String(hour);
+    cell.tabIndex = 0;
+    attachHourTooltip(cell, hour);
+    strip.appendChild(cell);
+
+    const tick = document.createElement('span');
+    tick.className = 'hour-tick';
+    tick.textContent = hour % 3 === 0 ? String(hour) : '';  // 全标会糊成一片
+    ticks.appendChild(tick);
+  }
+}
+
+function paintHours(data) {
+  const thresholds = logThresholds(
+    data.byHour.map((bucket) => bucket.total).filter((total) => total > 0),
+  );
+
+  let covered = 0;
+  const cells = $('hoursStrip').children;
+  for (let hour = 0; hour < cells.length; hour += 1) {
+    const total = data.byHour[hour].total;
+    covered += total;
+    cells[hour].dataset.level = String(levelFrom(total, thresholds));
+  }
+
+  $('hoursTitle').textContent = t('hoursTitle');
+  // 旧存档里没有时刻的记录只进日统计、进不了这一条。差得出来就说一声,
+  // 免得看着像是时段分布自己漏算了
+  const missing = data.grand - covered;
+  $('hoursNote').textContent = missing > 0 ? t('hoursPartial')(missing) : t('hoursNote');
 }
 
 function fitCells(columns) {
@@ -889,15 +1032,38 @@ function attachTooltip(cell) {
       + `<div class="tip-row"><span>${t('tipCallsLabel')}</span>`
       + `<b>${t('tipCalls')(stats.calls)}</b></div>`;
     tip.hidden = false;
+    placeTip(tip, cell);
+  };
+  const hide = () => { $('tip').hidden = true; };
 
-    const box = tip.getBoundingClientRect();
-    const anchor = cell.getBoundingClientRect();
-    let left = anchor.left + anchor.width / 2 - box.width / 2;
-    let top = anchor.top - box.height - 9;
-    left = Math.max(10, Math.min(left, window.innerWidth - box.width - 10));
-    if (top < 10) top = anchor.bottom + 9;
-    tip.style.left = `${left}px`;
-    tip.style.top = `${top}px`;
+  cell.addEventListener('mouseenter', show);
+  cell.addEventListener('focus', show);
+  cell.addEventListener('mouseleave', hide);
+  cell.addEventListener('blur', hide);
+}
+
+/** 把提示框摆在锚点正上方;顶上放不下就翻到下面,并且不越出窗口 */
+function placeTip(tip, anchor) {
+  const box = tip.getBoundingClientRect();
+  const rect = anchor.getBoundingClientRect();
+  let left = rect.left + rect.width / 2 - box.width / 2;
+  let top = rect.top - box.height - 9;
+  left = Math.max(10, Math.min(left, window.innerWidth - box.width - 10));
+  if (top < 10) top = rect.bottom + 9;
+  tip.style.left = `${left}px`;
+  tip.style.top = `${top}px`;
+}
+
+/** 时段格的悬浮明细。一格是几十天的累计,所以只有合计和调用次数,不拆分项 */
+function attachHourTooltip(cell, hour) {
+  const show = () => {
+    const bucket = (state.view && state.view.byHour[hour]) || { total: 0, calls: 0 };
+    const tip = $('tip');
+    tip.innerHTML = `<div class="tip-head">${t('tipHour')(hour)}　${fmt(bucket.total)}</div>`
+      + `<div class="tip-row"><span>${t('tipCallsLabel')}</span>`
+      + `<b>${t('tipCalls')(bucket.calls)}</b></div>`;
+    tip.hidden = false;
+    placeTip(tip, cell);
   };
   const hide = () => { $('tip').hidden = true; };
 
@@ -919,11 +1085,16 @@ function updateBrand() {
 
 function paint() {
   if (!state.data) return;
-  if (state.builtKey !== 'fixed') buildHeatmap();
+  if (state.builtKey !== 'fixed') {
+    buildHeatmap();
+    buildHours();
+  }
 
   const data = scoped();
+  state.view = data;  // 时段格的悬浮明细要读它
 
   paintHeatmap();
+  paintHours(data);
   paintLegend();
   paintSourcePicker();
   updateBrand();
@@ -1195,34 +1366,56 @@ function paintNotes(data) {
 
 /* -------------------------------------------------------------- 表格视图 */
 
+/** 表格的数据行。滚动窗口下按**小时**列 —— 按天列会把窗口之外的量也算进来 */
+function tableRows() {
+  const rows = new Map();
+  const bump = (key, label, parts, calls) => {
+    const acc = rows.get(key) || { label, parts: [0, 0, 0, 0], calls: 0 };
+    for (let i = 0; i < 4; i += 1) acc.parts[i] += parts[i];
+    acc.calls += calls;
+    rows.set(key, acc);
+  };
+
+  if (isRolling()) {
+    for (const id of selectedSourceIds()) {
+      for (const row of state.data.hourDaily[id] || []) {
+        const [day, hour] = row;
+        if (!hourInRange(day, hour)) continue;
+        const stamp = `${day} ${pad(hour)}`;
+        bump(stamp, `${stamp}:00`, row.slice(2, 6), row[6]);
+      }
+    }
+  } else {
+    for (let cursor = parseYmd(state.range.to); cursor >= parseYmd(state.range.from); cursor = addDays(cursor, -1)) {
+      const key = ymd(cursor);
+      const stats = dayStats(key);
+      if (stats.total > 0) bump(key, key, stats.parts, stats.calls);
+    }
+  }
+
+  return [...rows.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([, row]) => row);
+}
+
 function renderTable() {
   const container = $('tableView');
   container.hidden = !state.showTable;
   if (!state.showTable) return;
 
-  const ordered = [];
-  for (let cursor = parseYmd(state.range.to); cursor >= parseYmd(state.range.from); cursor = addDays(cursor, -1)) {
-    const key = ymd(cursor);
-    if (dayStats(key).total > 0) ordered.push(key);
-  }
-
-  if (!ordered.length) {
+  const rows = tableRows();
+  if (!rows.length) {
     container.innerHTML = `<p class="empty-note">${t('emptyTable')}</p>`;
     return;
   }
 
-  const body = ordered.map((day) => {
-    const stats = dayStats(day);
-    return `<tr>
-      <td>${day}</td>
-      <td>${fmt(stats.parts[0])}</td>
-      <td>${fmt(stats.parts[1])}</td>
-      <td>${fmt(stats.parts[2])}</td>
-      <td>${fmt(stats.parts[3])}</td>
-      <td>${fmt(stats.total)}</td>
-      <td>${fmt(stats.calls)}</td>
-    </tr>`;
-  }).join('');
+  const body = rows.map((row) => `<tr>
+      <td>${row.label}</td>
+      <td>${fmt(row.parts[0])}</td>
+      <td>${fmt(row.parts[1])}</td>
+      <td>${fmt(row.parts[2])}</td>
+      <td>${fmt(row.parts[3])}</td>
+      <td>${fmt(row.parts[0] + row.parts[1] + row.parts[2] + row.parts[3])}</td>
+      <td>${fmt(row.calls)}</td>
+    </tr>`).join('');
 
   container.innerHTML = `<table>
     <thead><tr>${L().tableHead.map((h) => `<th>${h}</th>`).join('')}</tr></thead>
@@ -1273,10 +1466,9 @@ function wireChrome() {
     const from = $('dateFrom').value;
     const to = $('dateTo').value;
     if (!from || !to || from > to) return;
-    state.range = { from, to };
     state.quick = null; // 手动改日期就不再属于任何快捷区间
     syncPressed($('quick'), null);
-    paint();
+    applyRange({ from, to });
   };
   $('dateFrom').addEventListener('change', onDate);
   $('dateTo').addEventListener('change', onDate);

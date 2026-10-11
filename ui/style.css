@@ -599,6 +599,74 @@ body::before {
 
 .tip-row b { color: var(--paper); font-weight: 500; }
 
+/* ------------------------------------------------------------- 时段分布
+
+   热力图下面常驻的一条 24 格。刻意和日热力图不一样:格子是竖长条而不是方块,
+   下面带小时刻度,顶上还有一行说明 —— 免得两张图被看成一回事。
+   颜色用的是它自己的一套阈值(单日的量和几十天合计差着数量级)。 */
+
+.hours-block {
+  margin-top: 24px;
+  border-top: 1px solid var(--line);
+  padding-top: 15px;
+}
+
+.hours-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 11px;
+  padding-left: 27px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.hours-title { font-size: 12px; font-weight: 600; color: var(--ink-2); }
+
+/* 每格等分宽度,留个上限免得宽屏下拉成一片色带 */
+.hours-strip {
+  display: flex;
+  gap: var(--gap);
+  padding-left: 27px;
+}
+
+.hours-ticks {
+  display: flex;
+  gap: var(--gap);
+  padding-left: 27px;
+  margin-top: 6px;
+}
+
+.hour-cell {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 40px;
+  height: 40px;
+  border-radius: 2px;
+  background: var(--empty);
+  transition: transform .12s ease;
+}
+
+.hour-cell[data-level="1"] { background: var(--l1); }
+.hour-cell[data-level="2"] { background: var(--l2); }
+.hour-cell[data-level="3"] { background: var(--l3); }
+.hour-cell[data-level="4"] { background: var(--l4); }
+.hour-cell[data-level="5"] { background: var(--l5); }
+
+.hour-cell:hover,
+.hour-cell:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+
+.hour-tick {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 40px;
+  text-align: center;
+  font-size: 10.5px;
+  line-height: 1;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
 /* 滚动条收细,别抢热力图的视觉 */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
