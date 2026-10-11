@@ -772,8 +772,14 @@ function applyRange(range) {
 
 function syncDateInputs() {
   if (!$('dateFrom')) return;
-  $('dateFrom').value = state.range.from || '';
-  $('dateTo').value = state.range.to || '';
+  // 正在编辑的那个框不要覆盖 —— 每分钟的自动刷新会走到这里,
+  // 手输到一半的值被冲掉的话,这条修改就永远提交不上
+  if (document.activeElement !== $('dateFrom')) {
+    $('dateFrom').value = state.range.from || '';
+  }
+  if (document.activeElement !== $('dateTo')) {
+    $('dateTo').value = state.range.to || '';
+  }
 }
 
 /* ------------------------------------------------------- 热力图:建 + 画 */
@@ -1458,15 +1464,25 @@ function wireChrome() {
   $('rescan').addEventListener('click', () => scan(true));
 
   const onDate = () => {
-    const from = $('dateFrom').value;
-    const to = $('dateTo').value;
-    if (!from || !to || from > to) return;
+    let from = $('dateFrom').value;
+    let to = $('dateTo').value;
+    if (!from || !to) return;   // 还没填完,等下一次
+    // 填反了就自己换过来。以前这里是直接 return —— 两个框看着都填好了,
+    // 程序却什么都不做,看起来就像"卡在上一个设置"里
+    if (from > to) {
+      [from, to] = [to, from];
+      $('dateFrom').value = from;
+      $('dateTo').value = to;
+    }
     state.quick = null; // 手动改日期就不再属于任何快捷区间
     syncPressed($('quick'), null);
     applyRange({ from, to });
   };
-  $('dateFrom').addEventListener('change', onDate);
-  $('dateTo').addEventListener('change', onDate);
+  for (const id of ['dateFrom', 'dateTo']) {
+    $(id).addEventListener('change', onDate);
+    // 手输的时候 change 要等失焦才来,等它的话中间那一拍是空的
+    $(id).addEventListener('input', onDate);
+  }
 
   let resizeTimer = 0;
   window.addEventListener('resize', () => {
