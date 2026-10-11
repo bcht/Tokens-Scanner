@@ -1130,16 +1130,11 @@ function paintSourcePicker() {
 function paintHero(data) {
   const hero = $('heroValue');
   const wrapper = hero.parentElement;
-  if (!data.grand) {
-    wrapper.hidden = true;
-    $('groupPicker').hidden = true;
-    document.querySelector('.rows-viewport').hidden = true;
-    return;
-  }
-  wrapper.hidden = false;
-  $('groupPicker').hidden = false;
-  document.querySelector('.rows-viewport').hidden = false;
 
+  // 范围里没有用量时**不要把整块藏掉** —— 一藏右侧就空一片,和"没读到数据"
+  // 看起来一样,而且切回有用量的范围时它会先空一下再冒出来。
+  // 数字照常显示 0,下面的分组和明细也照常在,只是全是 0。
+  //
   // 补偿位移施加在 .hero 上(数字和 "tokens" 的共同祖先),
   // 这样两个一起滑;只动其中一个的话它们会各走各的。
   setNumber(hero, heroText(data.grand, state.unitMode), wrapper);
