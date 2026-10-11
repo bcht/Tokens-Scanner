@@ -310,7 +310,10 @@ body::before {
   min-height: 0;
   background: var(--paper-raised);
   border-left: 1px solid var(--line);
-  overflow: auto;
+  /* 横向永远不出滚动条:大数字进位/换单位时,补偿位移是把整块 .hero 往右推,
+     而 .hero 是满宽块 —— 块右缘会短暂越界,虽然可见内容没越界。
+     只留纵向滚动(窗口矮时用得上)。 */
+  overflow: hidden auto;
 }
 
 .brand {
@@ -320,8 +323,10 @@ body::before {
   padding: 26px 26px 22px;
 }
 
-/* 语言切换:推到这个区块的最右边 */
-.brand .lang { margin-left: auto; flex: none; }
+/* 合计数字格式 / 语言切换:并排推到这一块的最右边 */
+.brand .unit { margin-left: auto; }
+.brand .unit,
+.brand .lang { flex: none; }
 
 .mark { width: 34px; height: 34px; flex: none; object-fit: contain; }
 
@@ -428,7 +433,9 @@ body::before {
 /* 数字 */
 .figures { display: flex; flex-direction: column; gap: 20px; padding-bottom: 22px; }
 
-.hero { display: flex; align-items: baseline; gap: 8px; }
+/* 切成「无单位」时长数字可能比这一行还宽 —— 那就自己横向滚,
+   不缩字号,也不撑破右栏(右栏本身不留横向滚动条) */
+.hero { display: flex; align-items: baseline; gap: 8px; overflow-x: auto; overflow-y: hidden; }
 
 .hero-value {
   font-family: var(--font-display);

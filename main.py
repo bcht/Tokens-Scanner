@@ -59,6 +59,12 @@ class Api:
     存档本身是按文件增量的,所以重复调用很便宜。
     """
 
+    # 白名单:只接受列出来的值,前端塞别的进来一律落回默认。
+    PREFS = {
+        "language": {"default": "zh", "allowed": ("zh", "en")},
+        "unit_mode": {"default": "auto", "allowed": ("auto", "raw")},
+    }
+
     def __init__(self):
         self._lock = threading.Lock()
         self._cache = Cache()
@@ -96,22 +102,30 @@ class Api:
     def rescan(self):
         return self.load()
 
-    # ---- 界面语言。存在存档里,这样下次启动还记得 ----
+    # ---- 界面偏好。存在存档的 meta 表里,这样下次启动还记得 ----
 
-    def get_language(self):
+    def _read_pref(self, key):
+        spec = self.PREFS[key]
         with self._lock:
             if self._cache.conn is None:
                 self._cache.open()
-            return self._cache.get_setting("language", "zh")
+            value = self._cache.get_setting(key, spec["default"])
+        return value if value in spec["allowed"] else spec["default"]
 
-    def set_language(self, language):
-        language = "en" if language == "en" else "zh"
+    def get_prefs(self):
+        return {key: self._read_pref(key) for key in self.PREFS}
+
+    def set_pref(self, key, value):
+        spec = self.PREFS.get(key)
+        if spec is None or value not in spec["allowed"]:
+            applog.log.warning("忽略未知的界面偏好 %s=%r", key, value)
+            return None
         with self._lock:
             if self._cache.conn is None:
                 self._cache.open()
-            ok = self._cache.set_setting("language", language)
-        applog.log.info("界面语言切换为 %s(持久化:%s)", language, ok)
-        return language
+            ok = self._cache.set_setting(key, value)
+        applog.log.info("界面偏好 %s=%s(持久化:%s)", key, value, ok)
+        return value
 
 
 def main():

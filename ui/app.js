@@ -62,6 +62,7 @@ const STRINGS = {
     part: ['输入', '输出', '缓存读', '缓存写'],
     scale: ['连续活跃天数', '调用次数', '活跃天数', '数据区间'],
     poll: { 30000: '30 秒', 60000: '1 分', 300000: '5 分', 0: '关' },
+    unitMode: { auto: '自动', raw: '无单位' },
     months: ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'],
     /* 周一起始,只标一/三/五,其余留空 —— 七行全标太挤 */
     weekdays: ['一', '', '三', '', '五', '', ''],
@@ -106,6 +107,7 @@ const STRINGS = {
     part: ['Input', 'Output', 'Cache read', 'Cache write'],
     scale: ['Streak', 'Calls', 'Active days', 'Range'],
     poll: { 30000: '30s', 60000: '1m', 300000: '5m', 0: 'Off' },
+    unitMode: { auto: 'Auto', raw: 'No unit' },
     months: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
     weekdays: ['M', '', 'W', '', 'F', '', ''],
     tableHead: ['Date', 'Input', 'Output', 'Cache read', 'Cache write', 'Total', 'Calls'],
@@ -144,6 +146,9 @@ const LANGUAGES = [
   { key: 'en', label: 'EN' },
 ];
 
+/* 合计大数字的显示格式。默认自动缩写,可以切成永远全位数 */
+const UNIT_MODES = [{ key: 'auto' }, { key: 'raw' }];
+
 let LANG = 'zh';
 
 /** 当前语言的全部文案 */
@@ -159,6 +164,7 @@ const state = {
   quick: '365',
   showTable: false,
   pollMs: 60000,
+  unitMode: 'auto',
   thresholds: [0, 0, 0, 0],
   fatal: null,
   builtKey: null,
@@ -212,6 +218,30 @@ function compact(n) {
 }
 
 const sumOf = (values) => values[0] + values[1] + values[2] + values[3];
+
+/**
+ * 合计大数字的文本。
+ *
+ * 小数**一律截断**,不进位 —— 这是用量,宁可少说不要多说。
+ * 唯一的例外是跨进 T 的那一下:999,999,999,999 按截断会写成 0.99T,
+ * 所以这里兜到 1.00T。
+ *
+ * 单位只有 B / T,不随界面语言变。无单位模式下永远全位数,
+ * 排不下交给 .hero 自己横向滚。
+ */
+const T_FROM = 999999999999;
+
+function heroText(n, mode) {
+  const plain = fmt(n);
+  if (mode === 'raw') return plain;
+
+  // 除以 perHundredth 得到"以该单位计、两位小数"的百分数,截断后摆回去
+  const cut = (value, perHundredth) => (Math.floor(value / perHundredth) / 100).toFixed(2);
+
+  if (n >= T_FROM) return cut(Math.max(1e12, n), 1e10) + 'T';
+  if (n >= 1e9) return cut(n, 1e7) + 'B';
+  return plain;
+}
 
 /* --------------------------------------- 滚动数字(只给合计大数字用) */
 
@@ -355,9 +385,13 @@ function boot() {
     return;
   }
 
-  // 先把上次选的语言读回来,免得先闪一下中文再切成英文
-  Promise.resolve(api.get_language ? api.get_language() : 'zh')
-    .then((lang) => applyLanguage(lang, false))
+  // 先把上次选的界面偏好读回来,免得先闪一下中文再切成英文
+  Promise.resolve(api.get_prefs ? api.get_prefs() : null)
+    .then((prefs) => {
+      if (!prefs) return;
+      applyLanguage(prefs.language, false);
+      applyUnitMode(prefs.unit_mode, false);
+    })
     .catch(() => {})
     .then(() => api.load())
     .then(acceptData)
@@ -583,6 +617,31 @@ function buildLangPicker() {
   buildPicker($('lang'), LANGUAGES, LANG, (option) => applyLanguage(option.key));
 }
 
+function buildUnitModePicker() {
+  buildPicker(
+    $('unitMode'),
+    UNIT_MODES.map((o) => ({ key: o.key, label: L().unitMode[o.key] })),
+    state.unitMode,
+    (option) => applyUnitMode(option.key),
+  );
+}
+
+/** 合计大数字带不带单位。和语言一样存回存档。 */
+function applyUnitMode(mode, persist = true) {
+  state.unitMode = mode === 'raw' ? 'raw' : 'auto';
+  syncPressed($('unitMode'), state.unitMode);
+  // 只重画合计那一块。注意数据要过 scoped() —— paintHero 要的是
+  // 按当前时间范围裁过的对象,直接喂 state.data 会拿不到 grand。
+  if (state.data) paintHero(scoped());
+  if (persist) persistPref('unit_mode', state.unitMode);
+}
+
+/** 界面偏好写回存档。桥接不在(浏览器里直接开)就静默跳过。 */
+function persistPref(key, value) {
+  const api = bridge();
+  if (api && api.set_pref) Promise.resolve(api.set_pref(key, value)).catch(() => {});
+}
+
 function resetLegend() {
   const legend = $('legend');
   delete legend.dataset.built;
@@ -608,6 +667,7 @@ function applyLanguage(lang, persist = true) {
   $('rescan').textContent = t('rescan');
 
   buildLangPicker();
+  buildUnitModePicker();
   buildQuick();
   buildGroupPicker();
   buildPoll();
@@ -621,10 +681,7 @@ function applyLanguage(lang, persist = true) {
   }
 
   if (!persist) return;
-  const api = bridge();
-  if (api && api.set_language) {
-    Promise.resolve(api.set_language(LANG)).catch(() => {});
-  }
+  persistPref('language', LANG);
 }
 
 function syncDateInputs() {
@@ -914,8 +971,7 @@ function paintHero(data) {
 
   // 补偿位移施加在 .hero 上(数字和 "tokens" 的共同祖先),
   // 这样两个一起滑;只动其中一个的话它们会各走各的。
-  setNumber(hero, fmt(data.grand), wrapper);
-  hero.style.fontSize = fmt(data.grand).length > 12 ? '30px' : '';
+  setNumber(hero, heroText(data.grand, state.unitMode), wrapper);
   $('brandSub').textContent = t('callCount')(data.calls);
 }
 
@@ -1238,6 +1294,7 @@ function wireChrome() {
 
 function start() {
   buildLangPicker();
+  buildUnitModePicker();
   buildQuick();
   buildGroupPicker();
   buildPoll();
