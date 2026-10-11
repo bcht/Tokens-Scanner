@@ -17,6 +17,34 @@ python main.py
 需要 Python 3.14+(解压 DSH 会话用到标准库 `compression.zstd`,该模块从 3.14 起提供;
 更早的版本要 `pip install zstandard`,`scanner.py` 里有回退分支)。
 
+## 日志
+
+**默认就写**,不用加参数。文件在 exe 旁边(目录不可写时退到 `%LOCALAPPDATA%\TokenUsage\`):
+
+```
+tokens-scanner.log        最新日志,写入中
+tokens-scanner.log.1      上一份(超过 2 MB 时轮转)
+```
+
+为什么默认就写:打包成 windowed 的 exe 没有控制台,启动失败时表现是
+**「双击没反应」**——没日志就等于什么都没留下,只能靠猜。日志里同时会收进
+pywebview 自己的消息(比如端口被占用),那类问题以前是完全看不见的。
+
+启动失败时**还会弹一个对话框**,告诉你错在哪、日志在哪个文件。
+
+### `--debug`
+
+```bash
+Tokens-Scanner.exe --debug
+```
+
+把级别降到 DEBUG:逐个会话文件(路径、记录条数、单文件耗时)、每次 JS 取数、
+pywebview 的内部日志全部记下来。并且在有控制台时**同步打印到控制台**。
+
+不加参数时只记 INFO:启动信息、扫描汇总、错误与未捕获异常。
+
+> 日志和存档一样含**本机绝对路径**,已在 `.gitignore` 里排除,不会被提交。
+
 ## 打包成 exe
 
 双击 `build.bat`,产物在 `dist\Tokens-Scanner.exe`。脚本会先删掉 `ui\data.json`

@@ -20,10 +20,14 @@ from __future__ import annotations
 import datetime as dt
 import glob
 import json
+import logging
 import os
+import time
 from collections import defaultdict
 
 from cache import session_key_for
+
+log = logging.getLogger("tokens.scanner")
 
 SOURCES = [
     ("claude_code", "Claude Code"),
@@ -378,6 +382,7 @@ def collect(cache=None):
         (parse_codex_file, path) for path in codex_files()
     ]
     stats["total_files"] = len(files)
+    log.debug("发现 %d 个会话文件", len(files))
 
     records = []
     errors = []
@@ -387,6 +392,7 @@ def collect(cache=None):
         try:
             stat = os.stat(path)
         except OSError:
+            log.debug("读不到 %s,跳过", path)
             continue
 
         key = session_key_for(parser.__name__, path)
@@ -397,24 +403,32 @@ def collect(cache=None):
                 and hit[1] == stat.st_mtime and hit[2] == stat.st_size):
             stats["reused"] += 1
             records.extend(hit[3])
+            log.debug("复用 %s(%d 条记录)", path, len(hit[3]))
             continue
 
+        started_file = time.perf_counter()
         try:
             parsed = parser(path)
         except Exception as exc:  # 单个文件出错不该拖垮整个程序
             errors.append(f"{os.path.basename(path)} 解析失败:{exc}")
+            log.warning("解析失败 %s: %s", path, exc, exc_info=True)
             continue
 
         stats["parsed"] += 1
         if cache is not None:
             cache.put(key, path, parser.__name__, stat.st_mtime, stat.st_size, parsed)
         records.extend(parsed)
+        log.debug(
+            "新解析 %s(%d 条记录,%.1f ms)",
+            path, len(parsed), (time.perf_counter() - started_file) * 1000,
+        )
 
     # 存档里那些磁盘上已经没有的会话,记录照样参与统计
     for key, (_path, _mtime, _size, archived) in cached.items():
         if key not in seen:
             stats["archived"] += 1
             records.extend(archived)
+            log.debug("已归档 %s(%d 条记录,源文件不在了)", key, len(archived))
 
     if cache is not None:
         cache.commit()
@@ -429,6 +443,16 @@ def collect(cache=None):
         "from_cache": stats["reused"] > 0,
     }
     stats["seconds"] = (dt.datetime.now() - started).total_seconds()
+
+    log.info(
+        "扫描完成: %.3fs  记录 %d 条  会话文件 %d(复用 %d / 新解析 %d / 已归档 %d)"
+        "  合计 %s tokens",
+        stats["seconds"], len(records), stats["total_files"],
+        stats["reused"], stats["parsed"], stats["archived"],
+        format(sum(sum(payload["totals"][s][:4]) for s in payload["totals"]), ","),
+    )
+    for warning in errors:
+        log.warning("解析告警: %s", warning)
     return payload, stats
 
 
