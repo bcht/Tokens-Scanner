@@ -320,6 +320,9 @@ body::before {
   padding: 26px 26px 22px;
 }
 
+/* 语言切换:推到这个区块的最右边 */
+.brand .lang { margin-left: auto; flex: none; }
+
 .mark { width: 34px; height: 34px; flex: none; object-fit: contain; }
 
 .brand-text { display: flex; flex-direction: column; }
@@ -622,6 +625,27 @@ body::before {
   .rail-block,
   .rail-foot { padding-left: 34px; padding-right: 34px; }
 }
+
+/* ------------------------------------------------------------ 英文适配
+
+   只调排版细节,**不动任何尺寸和布局** —— 英文标签在写文案时就挑过短词,
+   所以本来就排得下。这里做的两件事:
+   1. 英文界面把字体栈里的中文回退去掉 —— 用不上,也让意图写在明面上
+   2. 中文靠一点正字距换呼吸(方块字排列密),英文不需要,收回去 */
+
+html[lang="en"] {
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+}
+
+html[lang="zh-CN"] .row-label,
+html[lang="zh-CN"] .rail-title,
+html[lang="zh-CN"] .picker-label { letter-spacing: 0.012em; }
+
+/* 英文的字形本来就宽,同样的字号下略收一点,观感更整齐 */
+html[lang="en"] .row-label,
+html[lang="en"] .rail-title,
+html[lang="en"] .picker-label { letter-spacing: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }

@@ -8,32 +8,31 @@
    4. 切换分组时整块淡出淡入,并且要能扛住"动画没跑完就又来了新动作"。 */
 
 const DAY_MS = 86400000;
-const MONTH_LABELS = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
-const WEEKDAY_LABELS = ['一','二','三','四','五','六','日'];
 const WEEKDAY_GUTTER = 27;
 const CELL_GAP = 4;
 const RAMP_STEPS = 5;
 const ROWS_SLIDE_MS = 165;
 
+/* 标签都存在 STRINGS 里,这里只留 key —— 切换语言时重建即可 */
 const QUICK_RANGES = [
-  { key: '7d', label: '近 7 天', days: 7 },
-  { key: '30d', label: '近 30 天', days: 30 },
-  { key: '1y', label: '近一年', days: 365 },
-  { key: 'all', label: '全部', days: null },
+  { key: '7', days: 7 },
+  { key: '30', days: 30 },
+  { key: '365', days: 365 },
+  { key: 'all', days: null },
 ];
 
 const GROUP_OPTIONS = [
-  { key: 'parts', label: '构成' },
-  { key: 'sources', label: '按来源' },
-  { key: 'models', label: '按模型' },
-  { key: 'scale', label: '规模' },
+  { key: 'parts' },
+  { key: 'sources' },
+  { key: 'models' },
+  { key: 'scale' },
 ];
 
 const POLL_OPTIONS = [
-  { label: '30 秒', ms: 30000 },
-  { label: '1 分', ms: 60000 },
-  { label: '5 分', ms: 300000 },
-  { label: '关', ms: 0 },
+  { ms: 30000 },
+  { ms: 60000 },
+  { ms: 300000 },
+  { ms: 0 },
 ];
 
 const LOGOS = {
@@ -44,12 +43,120 @@ const LOGOS = {
   codex: 'logos/codex.svg',
 };
 
+/* ------------------------------------------------------------ 界面语言 */
+
+/* 英文标签刻意选短词 —— 现有的横排选择器和行标签是按中文宽度排的,
+   英文如果太长会撑行/换行,那就成改布局了。加语言时优先挑短同义词。
+   日期、数字、来源名(Claude Code 等专有名词)两种语言一样,不在这里。 */
+const STRINGS = {
+  zh: {
+    langLabel: '中文',
+    title: '最近 365 天',
+    loading: '载入中',
+    table: '表格',
+    sources: '数据来源',
+    allSources: '全部来源',
+    notDetected: '未探测到',
+    quick: { 7: '近 7 天', 30: '近 30 天', 365: '近一年', all: '全部' },
+    group: { parts: '构成', sources: '按来源', models: '按模型', scale: '规模' },
+    part: ['输入', '输出', '缓存读', '缓存写'],
+    scale: ['连续活跃天数', '调用次数', '活跃天数', '数据区间'],
+    poll: { 30000: '30 秒', 60000: '1 分', 300000: '5 分', 0: '关' },
+    months: ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'],
+    /* 周一起始,只标一/三/五,其余留空 —— 七行全标太挤 */
+    weekdays: ['一', '', '三', '', '五', '', ''],
+    tableHead: ['日期', '输入', '输出', '缓存读', '缓存写', '合计', '调用'],
+    rescan: '重新扫描',
+    scanning: '正在扫描…',
+    scanFailed: '扫描失败',
+    scannedAt: '扫描于',
+    callCount: (n) => `${fmt(n)} 次调用`,
+    tipCallsLabel: '调用',
+    tipCalls: (n) => `${fmt(n)} 次`,
+    tipHead: (d, total) => `${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日　${fmt(total)}`,
+    rangeSpan: (a, b) => `${a} 至 ${b}`,
+    legendEmpty: '没有用量',
+    legendTop: (v) => `${v} 以上`,
+    legendLess: '少',
+    legendMore: '多',
+    emptyTable: '这个范围里没有用量记录。',
+    readFailed: '没读到本机用量数据。确认 Python 环境正常后,点「重新扫描」再试。',
+    notDetectedNote: (name) => `${name} 在本机没有探测到数据。`,
+    dbUnavailable: (err) => `数据库不可用,每次都全量扫描:${err}`,
+    dbUpgraded: (file, moved) =>
+      `存档格式已升级,旧库另存为 ${file}` + (moved ? `,其中 ${moved} 条记录已搬入新库` : ''),
+    scanInfo: (s) => [
+      `${s.files} 个会话文件在磁盘上`,
+      `${s.reused} 个用存档`,
+      `新解析 ${s.parsed} 个`,
+      s.archived ? `${s.archived} 个已从磁盘消失但仍计入` : null,
+      `耗时 ${s.seconds}s`,
+    ].filter(Boolean).join(','),
+  },
+  en: {
+    langLabel: 'EN',
+    title: 'Last 365 days',
+    loading: 'Loading',
+    table: 'Table',
+    sources: 'Sources',
+    allSources: 'All sources',
+    notDetected: 'Not found',
+    quick: { 7: '7 days', 30: '30 days', 365: '1 year', all: 'All' },
+    group: { parts: 'Split', sources: 'Source', models: 'Model', scale: 'Scale' },
+    part: ['Input', 'Output', 'Cache read', 'Cache write'],
+    scale: ['Streak', 'Calls', 'Active days', 'Range'],
+    poll: { 30000: '30s', 60000: '1m', 300000: '5m', 0: 'Off' },
+    months: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+    weekdays: ['M', '', 'W', '', 'F', '', ''],
+    tableHead: ['Date', 'Input', 'Output', 'Cache read', 'Cache write', 'Total', 'Calls'],
+    rescan: 'Rescan',
+    scanning: 'Scanning…',
+    scanFailed: 'Scan failed',
+    scannedAt: 'Scanned',
+    callCount: (n) => `${fmt(n)} calls`,
+    tipCallsLabel: 'Calls',
+    tipCalls: (n) => `${fmt(n)}`,
+    tipHead: (d, total) =>
+      `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}　${fmt(total)}`,
+    rangeSpan: (a, b) => `${a} → ${b}`,
+    legendEmpty: 'No usage',
+    legendTop: (v) => `${v} and above`,
+    legendLess: 'Less',
+    legendMore: 'More',
+    emptyTable: 'No usage recorded in this range.',
+    readFailed: 'Could not read local usage data. Check the Python environment, then hit “Rescan”.',
+    notDetectedNote: (name) => `${name} was not found on this machine.`,
+    dbUnavailable: (err) => `Archive unavailable — rescanning everything each time: ${err}`,
+    dbUpgraded: (file, moved) =>
+      `Archive format upgraded; old file kept as ${file}` + (moved ? ` (${moved} records migrated)` : ''),
+    scanInfo: (s) => [
+      `${s.files} session files on disk`,
+      `${s.reused} from archive`,
+      `${s.parsed} parsed`,
+      s.archived ? `${s.archived} gone from disk but still counted` : null,
+      `${s.seconds}s`,
+    ].filter(Boolean).join(', '),
+  },
+};
+
+const LANGUAGES = [
+  { key: 'zh', label: '中文' },
+  { key: 'en', label: 'EN' },
+];
+
+let LANG = 'zh';
+
+/** 当前语言的全部文案 */
+const L = () => STRINGS[LANG];
+/** 查一条文案。字符串直接返回;带参数的自己调用,例如 t('callCount')(42) */
+const t = (key) => STRINGS[LANG][key];
+
 const state = {
   data: null,
   source: 'all',
   group: 'parts',
   range: { from: null, to: null },
-  quick: '1y',
+  quick: '365',
   showTable: false,
   pollMs: 60000,
   thresholds: [0, 0, 0, 0],
@@ -238,15 +345,27 @@ function bridge() {
 function boot() {
   if (loadAttempted) return;
   loadAttempted = true;
+
   const api = bridge();
-  const run = api
-    ? api.load()
-    : fetch('data.json').then((response) => response.json());
-  run.then(acceptData).catch(() => acceptData(null));
+  if (!api) {
+    fetch('data.json')
+      .then((response) => response.json())
+      .then(acceptData)
+      .catch(() => acceptData(null));
+    return;
+  }
+
+  // 先把上次选的语言读回来,免得先闪一下中文再切成英文
+  Promise.resolve(api.get_language ? api.get_language() : 'zh')
+    .then((lang) => applyLanguage(lang, false))
+    .catch(() => {})
+    .then(() => api.load())
+    .then(acceptData)
+    .catch(() => acceptData(null));
 }
 
 function acceptData(data) {
-  state.fatal = data ? null : '没读到本机用量数据。确认 Python 环境正常后,点「重新扫描」再试。';
+  state.fatal = data ? null : t('readFailed');
   state.data = data || {
     sources: [], daily: {}, modelDaily: {},
     totals: {}, warnings: [], firstDay: null, lastDay: null,
@@ -254,7 +373,7 @@ function acceptData(data) {
 
   if (!state.initialised) {
     state.initialised = true;
-    state.range = quickRange('1y');
+    state.range = quickRange('365');
   }
 
   // 来源集合一变就重建选择器
@@ -411,12 +530,12 @@ function syncPressed(container, key) {
 
 function buildSourcePicker() {
   // LOGO 只出现在最顶上的品牌区,选择器里不放
-  const options = [{ key: 'all', label: '全部来源' }];
+  const options = [{ key: 'all', label: t('allSources') }];
   for (const source of state.data.sources) {
     options.push({
       key: source.id,
       label: source.label,
-      meta: source.calls === 0 ? '未探测到' : compact(sumOf(state.data.totals[source.id] || [0, 0, 0, 0])),
+      meta: source.calls === 0 ? t('notDetected') : compact(sumOf(state.data.totals[source.id] || [0, 0, 0, 0])),
       disabled: source.calls === 0,
     });
   }
@@ -431,7 +550,7 @@ function buildSourcePicker() {
 }
 
 function buildGroupPicker() {
-  buildPicker($('groupPicker'), GROUP_OPTIONS, state.group, (option) => {
+  buildPicker($('groupPicker'), GROUP_OPTIONS.map((o) => ({ key: o.key, label: L().group[o.key] })), state.group, (option) => {
     state.group = option.key;
     syncPressed($('groupPicker'), state.group);
     paint();
@@ -439,7 +558,7 @@ function buildGroupPicker() {
 }
 
 function buildQuick() {
-  buildPicker($('quick'), QUICK_RANGES.map((q) => ({ key: q.key, label: q.label })), state.quick,
+  buildPicker($('quick'), QUICK_RANGES.map((q) => ({ key: q.key, label: L().quick[q.key] })), state.quick,
     (option) => {
       state.quick = option.key;
       state.range = quickRange(option.key);
@@ -451,12 +570,61 @@ function buildQuick() {
 }
 
 function buildPoll() {
-  buildPicker($('poll'), POLL_OPTIONS.map((o) => ({ key: String(o.ms), label: o.label })),
-    String(state.pollMs), (option) => {
+  buildPicker($('poll'), POLL_OPTIONS.map((o) => ({ key: String(o.ms), label: L().poll[o.ms] })),    String(state.pollMs), (option) => {
       state.pollMs = Number(option.key);
       syncPressed($('poll'), String(state.pollMs));
       schedulePoll();
     });
+}
+
+/* --------------------------------------------------------------- 语言切换 */
+
+function buildLangPicker() {
+  buildPicker($('lang'), LANGUAGES, LANG, (option) => applyLanguage(option.key));
+}
+
+function resetLegend() {
+  const legend = $('legend');
+  delete legend.dataset.built;
+  legend.textContent = '';
+}
+
+/**
+ * 切换界面语言。
+ *
+ * 所有带标签的控件都要**整体重建** —— 标签是烘进 DOM 的文本节点,
+ * 不是能改的属性。热力图也要重建(月份名、星期名在里面)。
+ *
+ * @param persist 是否把选择写回存档。启动时读回来那次不用写。
+ */
+function applyLanguage(lang, persist = true) {
+  LANG = lang === 'en' ? 'en' : 'zh';
+  document.documentElement.lang = LANG === 'en' ? 'en' : 'zh-CN';
+
+  // index.html 里的静态文案
+  $('rangeTitle').textContent = t('title');
+  $('tableToggle').textContent = t('table');
+  $('sourcesTitle').textContent = t('sources');
+  $('rescan').textContent = t('rescan');
+
+  buildLangPicker();
+  buildQuick();
+  buildGroupPicker();
+  buildPoll();
+  buildSourcePicker();
+
+  if (state.data) {
+    resetLegend();
+    state.builtKey = null;      // 热力图:月份名和星期名要换
+    state.rowSignature = null;  // 明细行:标签要换
+    paint();
+  }
+
+  if (!persist) return;
+  const api = bridge();
+  if (api && api.set_language) {
+    Promise.resolve(api.set_language(LANG)).catch(() => {});
+  }
 }
 
 function syncDateInputs() {
@@ -475,7 +643,7 @@ function buildHeatmap() {
   const totalDays = Math.round((end - gridStart) / DAY_MS) + 1;
   const weekCount = Math.ceil(totalDays / 7);
 
-  $('rangeSub').textContent = `${ymd(start)} 至 ${ymd(end)}`;
+  $('rangeSub').textContent = t('rangeSpan')(ymd(start), ymd(end));
 
   fitCells(weekCount);
   const cellSize = cellPitch();
@@ -513,16 +681,16 @@ function buildHeatmap() {
       monthSeen.add(week);
       const label = document.createElement('span');
       label.className = 'month-label';
-      label.textContent = MONTH_LABELS[date.getMonth()];
+      label.textContent = L().months[date.getMonth()];
       label.style.left = `${week * cellSize}px`;
       months.appendChild(label);
     }
   }
 
-  for (const name of WEEKDAY_LABELS) {
+  for (const mark of L().weekdays) {
     const span = document.createElement('span');
     span.className = 'weekday';
-    span.textContent = name === '一' || name === '三' || name === '五' ? name : '';
+    span.textContent = mark;
     weekdays.appendChild(span);
   }
 
@@ -595,14 +763,14 @@ let hoveredBand = null;
 
 function legendBandText(index) {
   const th = state.thresholds;
-  if (!th[3]) return index === 0 ? '没有用量' : '';
+  if (!th[3]) return index === 0 ? t('legendEmpty') : '';
   return [
-    '没有用量',
+    t('legendEmpty'),
     `0 – ${compact(th[0])}`,
     `${compact(th[0])} – ${compact(th[1])}`,
     `${compact(th[1])} – ${compact(th[2])}`,
     `${compact(th[2])} – ${compact(th[3])}`,
-    `${compact(th[3])} 以上`,
+    t('legendTop')(compact(th[3])),
   ][index] || '';
 }
 
@@ -611,7 +779,7 @@ function paintLegend() {
   if (!legend.dataset.built) {
     legend.dataset.built = '1';
     const less = document.createElement('span');
-    less.textContent = '少';
+    less.textContent = t('legendLess');
     legend.appendChild(less);
 
     const colors = ['var(--empty)', 'var(--l1)', 'var(--l2)', 'var(--l3)', 'var(--l4)', 'var(--l5)'];
@@ -627,7 +795,7 @@ function paintLegend() {
     });
 
     const more = document.createElement('span');
-    more.textContent = '多';
+    more.textContent = t('legendMore');
     legend.appendChild(more);
 
     const hint = document.createElement('span');
@@ -654,14 +822,15 @@ function attachTooltip(cell) {
     const stats = dayStats(cell.dataset.day);
     const tip = $('tip');
     const date = parseYmd(cell.dataset.day);
-    const rows = [['输入', stats.parts[0]], ['输出', stats.parts[1]], ['缓存读', stats.parts[2]], ['缓存写', stats.parts[3]]]
+    const rows = L().part
+      .map((label, index) => [label, stats.parts[index]])
       .filter(([, value]) => value > 0)
       .map(([label, value]) => `<div class="tip-row"><span>${label}</span><b>${fmt(value)}</b></div>`)
       .join('');
 
-    tip.innerHTML = `<div class="tip-head">${date.getFullYear()} 年 ${date.getMonth() + 1} 月 ${date.getDate()} 日`
-      + `　${fmt(stats.total)}</div>${rows}`
-      + `<div class="tip-row"><span>调用</span><b>${fmt(stats.calls)} 次</b></div>`;
+    tip.innerHTML = `<div class="tip-head">${t('tipHead')(date, stats.total)}</div>${rows}`
+      + `<div class="tip-row"><span>${t('tipCallsLabel')}</span>`
+      + `<b>${t('tipCalls')(stats.calls)}</b></div>`;
     tip.hidden = false;
 
     const box = tip.getBoundingClientRect();
@@ -686,7 +855,7 @@ function attachTooltip(cell) {
 function updateBrand() {
   $('brandLogo').src = LOGOS[state.source] || LOGOS.all;
   const label = state.source === 'all'
-    ? '全部来源'
+    ? t('allSources')
     : ((state.data.sources.find((s) => s.id === state.source) || {}).label || '');
   $('brandName').textContent = label;
 }
@@ -710,20 +879,12 @@ function paint() {
   const stamp = $('stamp');
   stamp.textContent = stampText();
   const scan = state.data.scan;
-  stamp.title = scan
-    ? [
-        `${scan.files} 个会话文件在磁盘上`,
-        `${scan.reused} 个用存档`,
-        `新解析 ${scan.parsed} 个`,
-        scan.archived ? `${scan.archived} 个已从磁盘消失但仍计入` : null,
-        `耗时 ${scan.seconds}s`,
-      ].filter(Boolean).join(',')
-    : '';
+  stamp.title = scan ? t('scanInfo')(scan) : '';
 }
 
 function stampText() {
   const raw = String(state.data.generated_at || '').replace('T', ' ');
-  return raw ? `扫描于 ${raw.slice(11, 16)}` : '';
+  return raw ? `${t('scannedAt')} ${raw.slice(11, 16)}` : '';
 }
 
 function paintSourcePicker() {
@@ -733,7 +894,7 @@ function paintSourcePicker() {
     const meta = button.querySelector('.picker-meta');
     if (!meta) continue;
     const source = state.data.sources.find((s) => s.id === key);
-    if (source) meta.textContent = source.calls === 0 ? '未探测到' : compact(sumOf(state.data.totals[key] || [0, 0, 0, 0]));
+    if (source) meta.textContent = source.calls === 0 ? t('notDetected') : compact(sumOf(state.data.totals[key] || [0, 0, 0, 0]));
   }
   syncPressed($('sourcePicker'), state.source);
 }
@@ -755,7 +916,7 @@ function paintHero(data) {
   // 这样两个一起滑;只动其中一个的话它们会各走各的。
   setNumber(hero, fmt(data.grand), wrapper);
   hero.style.fontSize = fmt(data.grand).length > 12 ? '30px' : '';
-  $('brandSub').textContent = `${fmt(data.calls)} 次调用`;
+  $('brandSub').textContent = t('callCount')(data.calls);
 }
 
 /** 行集合只在「分组 / 来源 / 模型种类」变化时才重建。 */
@@ -805,12 +966,9 @@ function buildRows(data) {
   } else if (state.group === 'models') {
     for (const model of modelOrder()) addRow(model);
   } else if (state.group === 'parts') {
-    for (const label of ['输入', '输出', '缓存读', '缓存写']) addRow(label);
+    for (const label of L().part) addRow(label);
   } else {
-    addRow('连续活跃天数');
-    addRow('调用次数');
-    addRow('活跃天数');
-    addRow('数据区间');
+    for (const label of L().scale) addRow(label);
   }
 
   container._entries = entries;
@@ -956,16 +1114,15 @@ function paintNotes(data) {
   if (state.fatal) notes.push(state.fatal);
 
   for (const source of state.data.sources) {
-    if (source.calls === 0) notes.push(`${source.label} 在本机没有探测到数据。`);
+    if (source.calls === 0) notes.push(t('notDetectedNote')(source.label));
   }
 
   if (state.data.scan && state.data.scan.db_error) {
-    notes.push(`数据库不可用,每次都全量扫描:${state.data.scan.db_error}`);
+    notes.push(t('dbUnavailable')(state.data.scan.db_error));
   }
   if (state.data.scan && state.data.scan.db_backup) {
     const name = state.data.scan.db_backup.split(/[\\/]/).pop();
-    const moved = state.data.scan.db_migrated || 0;
-    notes.push(`存档格式已升级,旧库另存为 ${name}` + (moved ? `,其中 ${moved} 条记录已搬入新库` : ''));
+    notes.push(t('dbUpgraded')(name, state.data.scan.db_migrated || 0));
   }
   for (const warning of state.data.warnings || []) notes.push(warning);
 
@@ -994,7 +1151,7 @@ function renderTable() {
   }
 
   if (!ordered.length) {
-    container.innerHTML = '<p class="empty-note">这个范围里没有用量记录。</p>';
+    container.innerHTML = `<p class="empty-note">${t('emptyTable')}</p>`;
     return;
   }
 
@@ -1012,9 +1169,7 @@ function renderTable() {
   }).join('');
 
   container.innerHTML = `<table>
-    <thead><tr>
-      <th>日期</th><th>输入</th><th>输出</th><th>缓存读</th><th>缓存写</th><th>合计</th><th>调用</th>
-    </tr></thead>
+    <thead><tr>${L().tableHead.map((h) => `<th>${h}</th>`).join('')}</tr></thead>
     <tbody>${body}</tbody>
   </table>`;
 }
@@ -1035,7 +1190,7 @@ function tickPoll() {
 function scan(manual) {
   if (scanInFlight) return;
   scanInFlight = true;
-  if (manual) $('stamp').textContent = '正在扫描…';
+  if (manual) $('stamp').textContent = t('scanning');
 
   const run = bridge()
     ? bridge().rescan()
@@ -1043,7 +1198,7 @@ function scan(manual) {
 
   return run
     .then(acceptData)
-    .catch(() => { if (manual) $('stamp').textContent = '扫描失败'; })
+    .catch(() => { if (manual) $('stamp').textContent = t('scanFailed'); })
     .finally(() => { scanInFlight = false; });
 }
 
@@ -1082,6 +1237,7 @@ function wireChrome() {
 }
 
 function start() {
+  buildLangPicker();
   buildQuick();
   buildGroupPicker();
   buildPoll();

@@ -96,6 +96,23 @@ class Api:
     def rescan(self):
         return self.load()
 
+    # ---- 界面语言。存在存档里,这样下次启动还记得 ----
+
+    def get_language(self):
+        with self._lock:
+            if self._cache.conn is None:
+                self._cache.open()
+            return self._cache.get_setting("language", "zh")
+
+    def set_language(self, language):
+        language = "en" if language == "en" else "zh"
+        with self._lock:
+            if self._cache.conn is None:
+                self._cache.open()
+            ok = self._cache.set_setting("language", language)
+        applog.log.info("界面语言切换为 %s(持久化:%s)", language, ok)
+        return language
+
 
 def main():
     debug = "--debug" in sys.argv

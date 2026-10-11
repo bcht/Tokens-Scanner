@@ -276,6 +276,36 @@ class Cache:
                 except sqlite3.Error as exc:
                     self.error = str(exc)
 
+    # ---- 设置项:复用 meta 表,免得为了一点偏好再开一个文件 ----
+
+    def get_setting(self, key, default=None):
+        with self._lock:
+            if self.conn is None:
+                return default
+            try:
+                row = self.conn.execute(
+                    "SELECT value FROM meta WHERE key = ?", (f"setting:{key}",)
+                ).fetchone()
+            except sqlite3.Error:
+                return default
+            return row[0] if row else default
+
+    def set_setting(self, key, value):
+        with self._lock:
+            if self.conn is None:
+                return False
+            try:
+                self.conn.execute(
+                    "INSERT INTO meta (key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (f"setting:{key}", str(value)),
+                )
+                self.conn.commit()
+            except sqlite3.Error as exc:
+                self.error = str(exc)
+                return False
+            return True
+
     def close(self):
         with self._lock:
             if self.conn is not None:
