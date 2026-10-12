@@ -722,6 +722,9 @@ html[lang="en"] .row-label,
 html[lang="en"] .rail-title,
 html[lang="en"] .picker-label { letter-spacing: 0; }
 
-@media (prefers-reduced-motion: reduce) {
-  * { transition: none !important; animation: none !important; }
-}
+/* 这里**故意不做** prefers-reduced-motion 适配 —— 别把它当成漏掉的无障碍支持补上。
+
+   动效是这套界面的一部分(数字滚动、切分组横滑、悬停反馈)。一旦跟着系统的
+   动效开关走,系统关掉时它们会一起消失,表现就是「换了台电脑动画就没了」——
+   Windows 的「调整为最佳性能」、远程桌面会话、虚拟机都会默认关掉那个开关。
+   取舍已经定过:动效必须有。 */
