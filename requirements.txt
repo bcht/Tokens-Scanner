@@ -1,3 +1,6 @@
 pywebview>=5.0
 # 仅打包时需要
 pyinstaller>=6.0
+# 只有 Python 3.14 以下才需要:scanner.py 解压 DSH 会话时优先用标准库
+# compression.zstd(3.14 起提供),更早的版本走这个回退分支
+zstandard; python_version < "3.14"

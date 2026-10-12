@@ -66,9 +66,32 @@ pywebview 的内部日志全部记下来。并且在有控制台时**同步打�
 
 ## 打包成 exe
 
-双击 `build.bat`,产物在 `dist\Tokens-Scanner.exe`。脚本会先删掉 `ui\data.json`
-再打包 —— 那是浏览器调试用的缓存,打进正式包的话,桥接一旦失败程序会拿
-构建那一刻的旧数据冒充当前数据。
+**双击 `build.bat`**,产物在 `dist\Tokens-Scanner.exe`(13 MB 上下)。
+
+它先**自检环境**再打包:Python 版本够不够、pywebview 和 PyInstaller 在不在 ——
+缺什么直接告诉你,而不是让 PyInstaller 在打包到一半时报一屏看不懂的错。
+缺的东西都是同一条命令补齐:
+
+```bash
+pip install -r requirements.txt
+```
+
+只想看环境行不行(不打包):
+
+```bash
+python build.py --check
+```
+
+打包前会删掉 `ui\data.json` —— 那是浏览器调试用的缓存,打进正式包的话,
+桥接一旦失败程序会拿构建那一刻的旧数据冒充当前数据。
+
+`build.bat` 里**一个中文都没有,这是故意的**:cmd 按 OEM 码页读 .bat,
+写中文在 GitHub 上和部分终端里都是乱码。中文提示全在 `build.py` 里。
+
+**只在 Windows 上能打**(产物是 Windows 的单文件 GUI exe),Python 要 3.14
+或更新 —— 解压 DSH 会话用到标准库 `compression.zstd`。更老的 Python 靠
+`zstandard` 走回退分支,那条依赖在 `requirements.txt` 里按版本条件声明,
+所以上面那条 `pip install -r` 在老 Python 上会自己把它装上。
 
 ## 数据库
 

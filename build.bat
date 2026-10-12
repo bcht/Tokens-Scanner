@@ -1,22 +1,37 @@
 @echo off
-REM 打包成单文件 exe,产物在 dist\Tokens-Scanner.exe
+REM ---------------------------------------------------------------------------
+REM One-click build.  Double-click this file, or run it from a terminal.
+REM
+REM Everything real -- the checks, the messages, the packaging -- lives in
+REM build.py.  This file only has to find Python, so it stays plain ASCII on
+REM purpose: cmd reads a .bat in the OEM codepage, so Chinese text here would
+REM come out as garbage both on GitHub and in some consoles.
+REM ---------------------------------------------------------------------------
+setlocal
 cd /d "%~dp0"
 
-REM ui\data.json 只是浏览器调试用的缓存,绝不能打进正式包:
-REM 否则桥接一旦失败,程序会拿构建那一刻的旧数据冒充当前数据。
-if exist "ui\data.json" del /q "ui\data.json"
+set "PY="
+py -3 -c "import sys" >nul 2>nul
+if not errorlevel 1 set "PY=py -3"
+if defined PY goto have_python
 
-python -m PyInstaller ^
-  --noconfirm ^
-  --onefile ^
-  --windowed ^
-  --name "Tokens-Scanner" ^
-  --add-data "ui;ui" ^
-  --hidden-import webview.platforms.edgechromium ^
-  --hidden-import webview.platforms.winforms ^
-  --hidden-import clr_loader ^
-  main.py
+python -c "import sys" >nul 2>nul
+if not errorlevel 1 set "PY=python"
+if defined PY goto have_python
 
 echo.
-echo 完成,产物: dist\Tokens-Scanner.exe
+echo   Python not found.
+echo.
+echo   Install Python 3.14 or newer from https://www.python.org/downloads/
+echo   and tick "Add python.exe to PATH" while installing.
+echo.
 pause
+exit /b 1
+
+:have_python
+%PY% build.py %*
+set "CODE=%ERRORLEVEL%"
+
+echo.
+pause
+exit /b %CODE%
